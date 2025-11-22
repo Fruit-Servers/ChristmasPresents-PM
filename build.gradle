@@ -1,3 +1,12 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'me.lucko:jar-relocator:1.7'
+    }
+}
+
 plugins {
     id 'java'
 }
@@ -20,9 +29,17 @@ repositories {
     maven { url = 'https://jitpack.io' }
 }
 
+configurations {
+    shade
+    implementation.extendsFrom shade
+}
+
 dependencies {
     compileOnly 'io.papermc.paper:paper-api:1.20.1-R0.1-SNAPSHOT'
     compileOnly 'com.github.MilkBowl:VaultAPI:1.7'
+    shade 'net.kyori:adventure-api:4.14.0'
+    shade 'net.kyori:adventure-text-serializer-legacy:4.14.0'
+    shade 'net.kyori:adventure-text-serializer-plain:4.14.0'
 }
 
 processResources {
@@ -35,4 +52,25 @@ processResources {
 jar {
     archiveBaseName.set('ChristmasPresents')
     archiveVersion.set(project.version)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    
+    doLast {
+        def jarFile = archiveFile.get().asFile
+        def tempJar = new File(jarFile.parentFile, jarFile.name + '.tmp')
+        jarFile.renameTo(tempJar)
+        
+        def relocator = new me.lucko.jarrelocator.JarRelocator(
+            tempJar,
+            jarFile,
+            [
+                new me.lucko.jarrelocator.Relocation('net.kyori', 'com.example.christmaspresents.libs.kyori')
+            ]
+        )
+        relocator.run()
+        tempJar.delete()
+    }
+    
+    from {
+        configurations.shade.collect { it.isDirectory() ? it : zipTree(it) }
+    }
 }
