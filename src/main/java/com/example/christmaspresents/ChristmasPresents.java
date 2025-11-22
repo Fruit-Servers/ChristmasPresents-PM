@@ -20,11 +20,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.PluginManager;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.ChatColor;
 
 import java.io.File;
 import java.io.IOException;
@@ -38,7 +34,6 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
     private final NamespacedKey harmlessKey = new NamespacedKey(this, "harmless_fx");
     private final NamespacedKey presentTitleKey = new NamespacedKey(this, "present_title");
     private final NamespacedKey presentTitleCreatedKey = new NamespacedKey(this, "present_title_created");
-    private final LegacyComponentSerializer legacy = LegacyComponentSerializer.builder().character('&').hexColors().build();
     private final Random random = new Random();
     private final Map<String, Long> specialCooldowns = new HashMap<>();
     private final Map<String, List<PresentEntry>> drops = new HashMap<>();
@@ -47,10 +42,10 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
     private FileConfiguration messagesConfig;
     private File titlesFile;
     private FileConfiguration titlesConfig;
-    private Component displayNameCommon;
-    private Component displayNameSpecial;
-    private java.util.List<Component> loreCommon;
-    private java.util.List<Component> loreSpecial;
+    private String displayNameCommon;
+    private String displayNameSpecial;
+    private java.util.List<String> loreCommon;
+    private java.util.List<String> loreSpecial;
     private final java.util.List<DeadZone> deadZones = new java.util.ArrayList<>();
     private final Set<org.bukkit.Location> presentLocations = new HashSet<>();
     private final Map<org.bukkit.Location, java.util.UUID> presentNameEntities = new HashMap<>();
@@ -409,8 +404,8 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
         if (chosen.kind == EntryKind.ITEM) {
             ItemStack reward = chosen.item.clone();
             playOpenAnimation(chestLoc, true, reward, player);
-            String name = reward.hasItemMeta() && reward.getItemMeta().hasDisplayName() ? net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(reward.getItemMeta().displayName()) : reward.getType().name();
-            player.sendMessage(Component.text("You received: ").color(NamedTextColor.GREEN).append(Component.text(name).color(NamedTextColor.GOLD).decorate(TextDecoration.BOLD)));
+            String name = reward.hasItemMeta() && reward.getItemMeta().hasDisplayName() ? reward.getItemMeta().getDisplayName() : reward.getType().name();
+            player.sendMessage(ChatColor.GREEN + "You received: " + ChatColor.GOLD + ChatColor.BOLD + name);
         } else if (chosen.kind == EntryKind.EFFECT) {
             playOpenAnimation(chestLoc, false, null, player);
             executeEffect(player, chosen.effectKey, presentType);
@@ -420,7 +415,7 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
     public ItemStack createPresent(boolean isSpecial) {
         ItemStack present = new ItemStack(Material.CHEST);
         ItemMeta meta = present.getItemMeta();
-        meta.displayName(isSpecial ? displayNameSpecial : displayNameCommon);
+        meta.setDisplayName(isSpecial ? displayNameSpecial : displayNameCommon);
         meta.getPersistentDataContainer().set(presentTypeKey, PersistentDataType.STRING, isSpecial ? "special" : "common");
         present.setItemMeta(meta);
         return present;
@@ -429,8 +424,8 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
     private void loadDisplayFromConfig() {
         String nameCommon = getConfig().getString("present_names.common", "&aFruitmas Present");
         String nameSpecial = getConfig().getString("present_names.special", "&6Special Fruitmas Present");
-        displayNameCommon = legacy.deserialize(nameCommon);
-        displayNameSpecial = legacy.deserialize(nameSpecial);
+        displayNameCommon = ChatColor.translateAlternateColorCodes('&', nameCommon);
+        displayNameSpecial = ChatColor.translateAlternateColorCodes('&', nameSpecial);
         loreCommon = new java.util.ArrayList<>();
         loreSpecial = new java.util.ArrayList<>();
     }
@@ -652,7 +647,7 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
             List<String> msgs = messagesConfig.getStringList("messages");
             if (msgs == null || msgs.isEmpty()) return;
             String m = msgs.get(random.nextInt(msgs.size()));
-            player.sendMessage(Component.text(m).color(NamedTextColor.AQUA));
+            player.sendMessage(ChatColor.AQUA + m);
             return;
         }
         if ("money_reward".equalsIgnoreCase(key)) {
@@ -664,11 +659,11 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
                 if (rsp != null) {
                     net.milkbowl.vault.economy.Economy econ = rsp.getProvider();
                     econ.depositPlayer(player, amount);
-                    player.sendMessage(Component.text("You received $" + amount + "!").color(NamedTextColor.GOLD).decorate(TextDecoration.BOLD));
+                    player.sendMessage(ChatColor.GOLD + "" + ChatColor.BOLD + "You received $" + amount + "!");
                     return;
                 }
             }
-            player.sendMessage(Component.text("Money reward failed - Vault not found").color(NamedTextColor.RED));
+            player.sendMessage(ChatColor.RED + "Money reward failed - Vault not found");
         }
     }
 
@@ -720,7 +715,7 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
         org.bukkit.World world = loc.getWorld();
         if (world == null) return;
         org.bukkit.entity.TextDisplay td = (org.bukkit.entity.TextDisplay) world.spawnEntity(loc.clone().add(0.5, 1.3, 0.5), org.bukkit.entity.EntityType.TEXT_DISPLAY);
-        td.text("special".equalsIgnoreCase(presentType) ? displayNameSpecial : displayNameCommon);
+        td.setText("special".equalsIgnoreCase(presentType) ? displayNameSpecial : displayNameCommon);
         td.setBillboard(org.bukkit.entity.Display.Billboard.CENTER);
         td.setShadowed(false);
         try { td.setBackgroundColor(org.bukkit.Color.fromARGB(0, 0, 0, 0)); } catch (Throwable ignored) {}
@@ -747,8 +742,8 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
             if (!ours) {
                 org.bukkit.entity.Display.Billboard bb = td.getBillboard();
                 if (bb == org.bukkit.entity.Display.Billboard.CENTER) {
-                    Component expected = "special".equalsIgnoreCase(presentType) ? displayNameSpecial : displayNameCommon;
-                    if (expected != null && expected.equals(td.text())) ours = true;
+                    String expected = "special".equalsIgnoreCase(presentType) ? displayNameSpecial : displayNameCommon;
+                    if (expected != null && expected.equals(td.getText())) ours = true;
                 }
             }
             if (ours) { found = td; break; }
@@ -907,7 +902,7 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
             spawnRandomPresents(count, null);
             if (getConfig().getBoolean("spawn_settings.spawn-message.enabled", true)) {
                 String msg = getConfig().getString("spawn_settings.spawn-message.text", "&c&lSanta has delivered some presents!");
-                getServer().broadcast(legacy.deserialize(msg));
+                getServer().broadcastMessage(ChatColor.translateAlternateColorCodes('&', msg));
             }
             scheduleNextSpawn();
         }, delayTicks).getTaskId();
