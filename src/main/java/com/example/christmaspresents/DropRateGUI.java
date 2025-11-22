@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
 public class DropRateGUI implements Listener {
     private final ChristmasPresents plugin;
@@ -124,9 +125,10 @@ public class DropRateGUI implements Listener {
         if (!(event.getWhoClicked() instanceof Player)) return;
         
         Player player = (Player) event.getWhoClicked();
-        Component title = event.getView().title();
+        String titleText = PlainTextComponentSerializer.plainText().serialize(event.getView().title());
+        String mainTitleText = PlainTextComponentSerializer.plainText().serialize(MAIN_TITLE);
         
-        if (title.equals(MAIN_TITLE)) {
+        if (titleText.equals(mainTitleText)) {
             event.setCancelled(true);
             
             if (event.getCurrentItem() == null) return;
