@@ -424,10 +424,22 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
     private void loadDisplayFromConfig() {
         String nameCommon = getConfig().getString("present_names.common", "&aFruitmas Present");
         String nameSpecial = getConfig().getString("present_names.special", "&6Special Fruitmas Present");
-        displayNameCommon = ChatColor.translateAlternateColorCodes('&', nameCommon);
-        displayNameSpecial = ChatColor.translateAlternateColorCodes('&', nameSpecial);
+        displayNameCommon = translateHexColorCodes(nameCommon);
+        displayNameSpecial = translateHexColorCodes(nameSpecial);
         loreCommon = new java.util.ArrayList<>();
         loreSpecial = new java.util.ArrayList<>();
+    }
+    
+    private String translateHexColorCodes(String message) {
+        java.util.regex.Pattern hexPattern = java.util.regex.Pattern.compile("&#([A-Fa-f0-9]{6})");
+        java.util.regex.Matcher matcher = hexPattern.matcher(message);
+        StringBuffer buffer = new StringBuffer(message.length() + 4 * 8);
+        while (matcher.find()) {
+            String group = matcher.group(1);
+            matcher.appendReplacement(buffer, net.md_5.bungee.api.ChatColor.of("#" + group).toString());
+        }
+        matcher.appendTail(buffer);
+        return ChatColor.translateAlternateColorCodes('&', buffer.toString());
     }
 
     private void loadCustomConfig() {
@@ -902,7 +914,7 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
             spawnRandomPresents(count, null);
             if (getConfig().getBoolean("spawn_settings.spawn-message.enabled", true)) {
                 String msg = getConfig().getString("spawn_settings.spawn-message.text", "&c&lSanta has delivered some presents!");
-                getServer().broadcastMessage(ChatColor.translateAlternateColorCodes('&', msg));
+                getServer().broadcastMessage(translateHexColorCodes(msg));
             }
             scheduleNextSpawn();
         }, delayTicks).getTaskId();
