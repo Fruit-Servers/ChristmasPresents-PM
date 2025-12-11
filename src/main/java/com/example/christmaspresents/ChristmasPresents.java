@@ -92,7 +92,6 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
         registerCommands();
         getServer().getPluginManager().registerEvents(this, this);
         scheduleNextSpawn();
-        getServer().getScheduler().runTaskTimer(this, () -> { try { sweepOrphanTitles(); } catch (Throwable ignored) {} }, 20L * 60L * 2L, 20L * 60L * 2L);
         loadPresentLocations();
         restorePresentTitles();
         getLogger().info("ChristmasPresents has been enabled!");
@@ -230,11 +229,6 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
                 }
                 spawnRandomPresents(cnt, sender);
                 break;
-            case "cleantitles":
-                if (!sender.hasPermission("presents.admin")) return true;
-                int removedTitles = sweepOrphanTitles();
-                sender.sendMessage("§eRemoved " + removedTitles + " orphan titles");
-                break;
             case "createdeadzone":
                 if (!sender.hasPermission("presents.admin")) return true;
                 if (args.length < 3) { sender.sendMessage("Usage: /presents createdeadzone <x,y,z> <x,y,z>"); return true; }
@@ -251,11 +245,6 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
                 deadZones.add(dz);
                 saveDeadZones();
                 sender.sendMessage("§aDeadzone created for world " + dw.getName());
-                break;
-            case "retitle":
-                if (!sender.hasPermission("presents.admin")) return true;
-                int created = forceRetitleAll();
-                sender.sendMessage("§aEnsured titles for " + created + " presents");
                 break;
             case "resetdrops":
                 if (!sender.hasPermission("presents.admin")) return true;
@@ -305,8 +294,6 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
                 base.add("spawn");
                 base.add("clear");
                 base.add("resetdrops");
-                base.add("cleantitles");
-                base.add("retitle");
                 base.add("createdeadzone");
             }
             return filter(base, args[0]);
@@ -751,9 +738,8 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
         if (w == null) return;
         java.util.UUID id = presentNameEntities.get(loc);
         if (id != null) {
-            for (org.bukkit.entity.Entity e : w.getEntities()) {
-                if (e.getUniqueId().equals(id)) return;
-            }
+            org.bukkit.entity.Entity existing = org.bukkit.Bukkit.getEntity(id);
+            if (existing != null && existing.isValid()) return;
         }
         org.bukkit.entity.TextDisplay found = null;
         for (org.bukkit.entity.Entity e : w.getNearbyEntities(loc.clone().add(0.5, 1.2, 0.5), 1.5, 1.5, 1.5)) {
@@ -773,37 +759,16 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
             try { found.getPersistentDataContainer().set(presentTitleKey, PersistentDataType.BYTE, (byte)1); } catch (Throwable ignored) {}
             try { found.getPersistentDataContainer().set(presentTitleCreatedKey, PersistentDataType.LONG, System.currentTimeMillis()); } catch (Throwable ignored) {}
             presentNameEntities.put(loc, found.getUniqueId());
-            saveTitleUuidMap();
             return;
         }
         spawnPresentName(loc, presentType);
-        getServer().getScheduler().runTaskLater(this, () -> {
-            java.util.UUID nid = presentNameEntities.get(loc);
-            boolean missing = true;
-            if (nid != null) {
-                for (org.bukkit.entity.Entity e : w.getEntities()) { if (e.getUniqueId().equals(nid)) { missing = false; break; } }
-            }
-            if (missing) spawnPresentName(loc, presentType);
-        }, 10L);
-        getServer().getScheduler().runTaskLater(this, () -> {
-            java.util.UUID nid = presentNameEntities.get(loc);
-            boolean missing = true;
-            if (nid != null) {
-                for (org.bukkit.entity.Entity e : w.getEntities()) { if (e.getUniqueId().equals(nid)) { missing = false; break; } }
-            }
-            if (missing) spawnPresentName(loc, presentType);
-        }, 40L);
     }
 
     private void removePresentName(org.bukkit.Location loc) {
         java.util.UUID id = presentNameEntities.remove(loc);
         if (id == null) return;
-        org.bukkit.World w = loc.getWorld();
-        if (w == null) return;
-        for (org.bukkit.entity.Entity e : w.getEntities()) {
-            if (e.getUniqueId().equals(id)) { e.remove(); break; }
-        }
-        saveTitleUuidMap();
+        org.bukkit.entity.Entity e = org.bukkit.Bukkit.getEntity(id);
+        if (e != null) e.remove();
     }
 
     private void cleanupTitlesAt(org.bukkit.Location loc) {
@@ -854,63 +819,6 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
         try { titlesConfig.save(new File(getDataFolder(), "titles.yml")); } catch (IOException ignored) {}
     }
 
-    private int sweepOrphanTitles() {
-        int removed = 0;
-        for (org.bukkit.World w : getServer().getWorlds()) {
-            for (org.bukkit.entity.Entity e : w.getEntities()) {
-                if (e.getType() != org.bukkit.entity.EntityType.TEXT_DISPLAY && e.getType() != org.bukkit.entity.EntityType.ARMOR_STAND) continue;
-                boolean ours = e.getPersistentDataContainer().has(presentTitleKey, PersistentDataType.BYTE) || presentNameEntities.containsValue(e.getUniqueId());
-                if (!ours) continue;
-                long createdAt = 0L;
-                try { Long v = e.getPersistentDataContainer().get(presentTitleCreatedKey, PersistentDataType.LONG); if (v != null) createdAt = v; } catch (Throwable ignored) {}
-                if (createdAt > 0L && System.currentTimeMillis() - createdAt < 60000L) continue;
-                org.bukkit.Location el = e.getLocation();
-                org.bukkit.block.Block below = w.getBlockAt(el.getBlockX(), el.getBlockY() - 1, el.getBlockZ());
-                boolean valid = false;
-                if (below.getType() == org.bukkit.Material.CHEST && below.getState() instanceof org.bukkit.block.TileState) {
-                    org.bukkit.block.TileState st = (org.bukkit.block.TileState) below.getState();
-                    valid = st.getPersistentDataContainer().has(presentTypeKey, PersistentDataType.STRING);
-                }
-                if (!valid) {
-                    org.bukkit.Location floored = new org.bukkit.Location(w, el.getBlockX(), el.getBlockY() - 1, el.getBlockZ());
-                    if (presentLocations.contains(floored)) continue;
-                    e.remove();
-                    // also drop from our map if it exists keyed by this location
-                    java.util.List<org.bukkit.Location> toDrop = new java.util.ArrayList<>();
-                    for (java.util.Map.Entry<org.bukkit.Location, java.util.UUID> en : presentNameEntities.entrySet()) {
-                        if (en.getValue().equals(e.getUniqueId())) toDrop.add(en.getKey());
-                    }
-                    for (org.bukkit.Location l : toDrop) presentNameEntities.remove(l);
-                    if (!toDrop.isEmpty()) saveTitleUuidMap();
-                    removed++;
-                }
-            }
-        }
-        return removed;
-    }
-
-    private int forceRetitleAll() {
-        int ensured = 0;
-        for (org.bukkit.Location loc : new java.util.HashSet<>(presentLocations)) {
-            org.bukkit.World w = loc.getWorld();
-            if (w == null) continue;
-            org.bukkit.block.Block b = w.getBlockAt(loc);
-            if (!(b.getState() instanceof org.bukkit.block.TileState)) continue;
-            org.bukkit.block.TileState st = (org.bukkit.block.TileState) b.getState();
-            String type = st.getPersistentDataContainer().get(presentTypeKey, PersistentDataType.STRING);
-            if (type == null) continue;
-            java.util.UUID id = presentNameEntities.get(loc);
-            boolean have = false;
-            if (id != null) {
-                for (org.bukkit.entity.Entity e : w.getEntities()) { if (e.getUniqueId().equals(id)) { have = true; break; } }
-            }
-            if (!have) {
-                ensureTitleFor(loc, type);
-                ensured++;
-            }
-        }
-        return ensured;
-    }
 
     private void scheduleNextSpawn() {
         if (spawnTaskId != -1) getServer().getScheduler().cancelTask(spawnTaskId);
@@ -939,63 +847,76 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
             if (activeWorlds.contains(p.getWorld().getName())) eligiblePlayers.add(p);
         }
         if (eligiblePlayers.isEmpty()) { if (feedback != null) feedback.sendMessage("§eNo players online in active worlds"); return; }
-        int spawned = 0;
-        int attempts = 0;
-        int maxAttempts = count * 500;
-        while (spawned < count && attempts < maxAttempts) {
-            attempts++;
-            Player basePlayer = eligiblePlayers.get(random.nextInt(eligiblePlayers.size()));
-            org.bukkit.World w = basePlayer.getWorld();
-            org.bukkit.Location playerLoc = basePlayer.getLocation();
-            int playerY = playerLoc.getBlockY();
-            int bx = playerLoc.getBlockX();
-            int bz = playerLoc.getBlockZ();
-            int radius = 3 + random.nextInt(13);
-            double angle = random.nextDouble() * Math.PI * 2;
-            int offsetX = (int)(Math.cos(angle) * radius);
-            int offsetZ = (int)(Math.sin(angle) * radius);
-            int rx = bx + offsetX;
-            int rz = bz + offsetZ;
-            
-            org.bukkit.block.Block ground = null;
-            for (int dy = -3; dy <= 3; dy++) {
-                int checkY = playerY + dy;
-                if (checkY < w.getMinHeight() || checkY > w.getMaxHeight() - 1) continue;
-                org.bukkit.block.Block check = w.getBlockAt(rx, checkY, rz);
-                if (isValidGroundBlock(check.getType())) {
-                    org.bukkit.block.Block above = check.getRelative(0, 1, 0);
-                    if (above.getType() == org.bukkit.Material.AIR) {
-                        ground = check;
-                        break;
+        final java.util.List<Player> players = eligiblePlayers;
+        final int[] spawned = {0};
+        final int[] attempts = {0};
+        final int maxAttempts = count * 50;
+        final int attemptsPerTick = 50;
+        new org.bukkit.scheduler.BukkitRunnable() {
+            @Override
+            public void run() {
+                int tickAttempts = 0;
+                while (spawned[0] < count && attempts[0] < maxAttempts && tickAttempts < attemptsPerTick) {
+                    attempts[0]++;
+                    tickAttempts++;
+                    Player basePlayer = players.get(random.nextInt(players.size()));
+                    if (!basePlayer.isOnline()) continue;
+                    org.bukkit.World w = basePlayer.getWorld();
+                    org.bukkit.Location playerLoc = basePlayer.getLocation();
+                    int playerY = playerLoc.getBlockY();
+                    int bx = playerLoc.getBlockX();
+                    int bz = playerLoc.getBlockZ();
+                    int radius = 3 + random.nextInt(13);
+                    double angle = random.nextDouble() * Math.PI * 2;
+                    int offsetX = (int)(Math.cos(angle) * radius);
+                    int offsetZ = (int)(Math.sin(angle) * radius);
+                    int rx = bx + offsetX;
+                    int rz = bz + offsetZ;
+                    
+                    org.bukkit.block.Block ground = null;
+                    for (int dy = -3; dy <= 3; dy++) {
+                        int checkY = playerY + dy;
+                        if (checkY < w.getMinHeight() || checkY > w.getMaxHeight() - 1) continue;
+                        org.bukkit.block.Block check = w.getBlockAt(rx, checkY, rz);
+                        if (isValidGroundBlock(check.getType())) {
+                            org.bukkit.block.Block above = check.getRelative(0, 1, 0);
+                            if (above.getType() == org.bukkit.Material.AIR) {
+                                ground = check;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (ground == null) continue;
+                    org.bukkit.block.Block place = ground.getRelative(0, 1, 0);
+                    org.bukkit.Location base = place.getLocation();
+                    if (isBlockedByDeadzone(base)) continue;
+                    if (!isFarFromPresents(base, 5.0)) continue;
+                    place.setType(org.bukkit.Material.CHEST, false);
+                    if (place.getState() instanceof org.bukkit.block.TileState) {
+                        org.bukkit.block.TileState st = (org.bukkit.block.TileState) place.getState();
+                        double specialChance = Math.max(0D, Math.min(1D, customConfig.getDouble("settings.spawn.specialChance", 0.01D)));
+                        String type = random.nextDouble() < specialChance ? "special" : "common";
+                        st.getPersistentDataContainer().set(presentTypeKey, PersistentDataType.STRING, type);
+                        st.update(true, false);
+                        org.bukkit.Location pl = place.getLocation();
+                        spawnPresentName(pl, type);
+                        presentLocations.add(place.getLocation());
+                        getLogger().info("Spawned present at " + base.getBlockX() + "," + base.getBlockY() + "," + base.getBlockZ() + " near " + basePlayer.getName());
+                        spawned[0]++;
+                    } else {
+                        place.setType(org.bukkit.Material.AIR, false);
                     }
                 }
+                if (spawned[0] >= count || attempts[0] >= maxAttempts) {
+                    cancel();
+                    savePresentLocations();
+                    saveTitleUuidMap();
+                    getLogger().info("Spawn attempt complete. Spawned: " + spawned[0] + "/" + count + ", attempts: " + attempts[0]);
+                    if (feedback != null) feedback.sendMessage("§eSpawned " + spawned[0] + "/" + count + " presents (attempts: " + attempts[0] + ")");
+                }
             }
-            
-            if (ground == null) continue;
-            org.bukkit.block.Block place = ground.getRelative(0, 1, 0);
-            org.bukkit.Location base = place.getLocation();
-            if (isBlockedByDeadzone(base)) continue;
-            if (!isFarFromPresents(base, 5.0)) continue;
-            place.setType(org.bukkit.Material.CHEST, false);
-            if (place.getState() instanceof org.bukkit.block.TileState) {
-                org.bukkit.block.TileState st = (org.bukkit.block.TileState) place.getState();
-                double specialChance = Math.max(0D, Math.min(1D, customConfig.getDouble("settings.spawn.specialChance", 0.01D)));
-                String type = random.nextDouble() < specialChance ? "special" : "common";
-                st.getPersistentDataContainer().set(presentTypeKey, PersistentDataType.STRING, type);
-                st.update(true, false);
-                org.bukkit.Location pl = place.getLocation();
-                spawnPresentName(pl, type);
-                getServer().getScheduler().runTaskLater(this, () -> ensureTitleFor(pl, type), 1L);
-                presentLocations.add(place.getLocation());
-                savePresentLocations();
-                getLogger().info("Spawned present at " + base.getBlockX() + "," + base.getBlockY() + "," + base.getBlockZ() + " near " + basePlayer.getName());
-                spawned++;
-            } else {
-                place.setType(org.bukkit.Material.AIR, false);
-            }
-        }
-        getLogger().info("Spawn attempt complete. Spawned: " + spawned + "/" + count + ", attempts: " + attempts);
-        if (feedback != null) feedback.sendMessage("§eSpawned " + spawned + "/" + count + " presents (attempts: " + attempts + ")");
+        }.runTaskTimer(this, 0L, 1L);
     }
 
     private boolean isValidGroundBlock(org.bukkit.Material mat) {

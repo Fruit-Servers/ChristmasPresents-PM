@@ -35,6 +35,6 @@ processResources {
 }
 
 jar {
-    archiveBaseName.set('ChristmasPresents[SB]')
-    archiveVersion.set(project.version)
+    archiveBaseName.set('[SB]ChristmasPresents')
+    archiveVersion.set('1.0.5-lagfix')
 }
