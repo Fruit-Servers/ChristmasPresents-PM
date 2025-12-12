@@ -243,6 +243,11 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
                 saveCustomConfig();
                 sender.sendMessage("§cAll present drops have been reset");
                 break;
+            case "cleanorphans":
+                if (!sender.hasPermission("presents.admin")) return true;
+                int orphansRemoved = cleanOrphanTitles();
+                sender.sendMessage("§eRemoved " + orphansRemoved + " orphan present titles");
+                break;
             default:
                 if (player != null) player.sendMessage("§cUnknown command. Use /presents for help.");
                 else sender.sendMessage("Unknown subcommand");
@@ -284,6 +289,7 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
                 base.add("clear");
                 base.add("resetdrops");
                 base.add("createdeadzone");
+                base.add("cleanorphans");
             }
             return filter(base, args[0]);
         }
@@ -727,6 +733,11 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
     private void ensureTitleFor(org.bukkit.Location loc, String presentType) {
         org.bukkit.World w = loc.getWorld();
         if (w == null) return;
+        org.bukkit.block.Block b = w.getBlockAt(loc);
+        if (b.getType() != org.bukkit.Material.CHEST) {
+            removePresentName(loc);
+            return;
+        }
         java.util.UUID id = presentNameEntities.get(loc);
         if (id != null) {
             org.bukkit.entity.Entity existing = org.bukkit.Bukkit.getEntity(id);
@@ -810,6 +821,52 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
         try { titlesConfig.save(new File(getDataFolder(), "titles.yml")); } catch (IOException ignored) {}
     }
 
+    private int cleanOrphanTitles() {
+        int removed = 0;
+        for (org.bukkit.World w : getServer().getWorlds()) {
+            for (org.bukkit.entity.Entity e : w.getEntities()) {
+                if (e.getType() != org.bukkit.entity.EntityType.TEXT_DISPLAY) continue;
+                if (!e.getPersistentDataContainer().has(presentTitleKey, PersistentDataType.BYTE)) continue;
+                org.bukkit.Location el = e.getLocation();
+                org.bukkit.block.Block below = w.getBlockAt(el.getBlockX(), el.getBlockY() - 1, el.getBlockZ());
+                boolean valid = false;
+                if (below.getType() == org.bukkit.Material.CHEST && below.getState() instanceof org.bukkit.block.TileState) {
+                    org.bukkit.block.TileState st = (org.bukkit.block.TileState) below.getState();
+                    valid = st.getPersistentDataContainer().has(presentTypeKey, PersistentDataType.STRING);
+                }
+                if (!valid) {
+                    e.remove();
+                    removed++;
+                }
+            }
+        }
+        java.util.List<org.bukkit.Location> staleLocations = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<org.bukkit.Location, java.util.UUID> entry : presentNameEntities.entrySet()) {
+            org.bukkit.entity.Entity ent = org.bukkit.Bukkit.getEntity(entry.getValue());
+            if (ent == null || !ent.isValid()) {
+                staleLocations.add(entry.getKey());
+            }
+        }
+        for (org.bukkit.Location loc : staleLocations) {
+            presentNameEntities.remove(loc);
+        }
+        if (!staleLocations.isEmpty()) saveTitleUuidMap();
+        return removed;
+    }
+
+    @EventHandler
+    public void onBlockBreak(org.bukkit.event.block.BlockBreakEvent event) {
+        org.bukkit.block.Block block = event.getBlock();
+        if (block.getType() != org.bukkit.Material.CHEST) return;
+        org.bukkit.Location loc = block.getLocation();
+        if (!presentLocations.contains(loc)) return;
+        if (!(block.getState() instanceof org.bukkit.block.TileState)) return;
+        org.bukkit.block.TileState state = (org.bukkit.block.TileState) block.getState();
+        if (!state.getPersistentDataContainer().has(presentTypeKey, PersistentDataType.STRING)) return;
+        cleanupTitlesAt(loc);
+        presentLocations.remove(loc);
+        savePresentLocations();
+    }
 
     private void scheduleNextSpawn() {
         if (spawnTaskId != -1) getServer().getScheduler().cancelTask(spawnTaskId);
@@ -898,7 +955,7 @@ public class ChristmasPresents extends JavaPlugin implements Listener, TabComple
                     if (feedback != null) feedback.sendMessage("§eSpawned " + spawned[0] + "/" + count + " presents (attempts: " + attempts[0] + ")");
                 }
             }
-        }.runTaskTimer(ChristmasPresents.this, 0L, 1L);
+        }.runTaskTimer(this, 0L, 1L);
     }
 
     private boolean isAllowedSurface(org.bukkit.Material mat) {
