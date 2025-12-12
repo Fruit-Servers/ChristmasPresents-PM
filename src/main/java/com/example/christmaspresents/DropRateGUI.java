@@ -20,14 +20,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.bukkit.ChatColor;
 
 public class DropRateGUI implements Listener {
     private final ChristmasPresents plugin;
     private final String MAIN_TITLE = ChatColor.GOLD + "" + ChatColor.BOLD + "Present Drop Rates";
+    private final String LIST_TITLE_PREFIX = ChatColor.GOLD + "" + ChatColor.BOLD + "Items: ";
     private final NamespacedKey entryKey;
     private final Map<UUID, String> openType = new HashMap<>();
+    private final Map<UUID, Integer> openPage = new HashMap<>();
+    private static final int ITEMS_PER_PAGE = 45;
 
     public DropRateGUI(ChristmasPresents plugin) {
         this.plugin = plugin;
@@ -59,19 +61,25 @@ public class DropRateGUI implements Listener {
         
         player.openInventory(inv);
         openType.remove(player.getUniqueId());
+        openPage.remove(player.getUniqueId());
     }
     
     public void openItemList(Player player, String presentType) {
+        openItemList(player, presentType, 0);
+    }
+    
+    public void openItemList(Player player, String presentType, int page) {
         List<ChristmasPresents.PresentEntry> list = plugin.getDrops().getOrDefault(presentType, java.util.Collections.emptyList());
-        List<ChristmasPresents.PresentEntry> itemEntries = list.stream().collect(Collectors.toList());
+        int totalPages = Math.max(1, (int) Math.ceil(list.size() / (double) ITEMS_PER_PAGE));
+        page = Math.max(0, Math.min(page, totalPages - 1));
         
-        int size = (int) Math.ceil((itemEntries.size() + 8) / 9.0) * 9;
-        size = Math.max(9, Math.min(54, size));
+        int startIndex = page * ITEMS_PER_PAGE;
+        int endIndex = Math.min(startIndex + ITEMS_PER_PAGE, list.size());
         
-        Inventory inv = Bukkit.createInventory(null, size, ChatColor.GOLD + "" + ChatColor.BOLD + "Select Items: " + ChatColor.WHITE + ChatColor.BOLD + presentType);
+        Inventory inv = Bukkit.createInventory(null, 54, LIST_TITLE_PREFIX + presentType + " (" + (page + 1) + "/" + totalPages + ")");
         
-        for (int i = 0; i < itemEntries.size(); i++) {
-            ChristmasPresents.PresentEntry entry = itemEntries.get(i);
+        for (int i = startIndex; i < endIndex; i++) {
+            ChristmasPresents.PresentEntry entry = list.get(i);
             ItemStack item;
             if (entry.kind == ChristmasPresents.EntryKind.EFFECT) {
                 Material mat = Material.PAPER;
@@ -81,54 +89,61 @@ public class DropRateGUI implements Listener {
                 else if ("money_reward".equalsIgnoreCase(entry.effectKey)) { mat = Material.GOLD_INGOT; name = "Money Reward"; }
                 item = new ItemStack(mat);
                 ItemMeta m = item.getItemMeta();
-                m.setDisplayName(ChatColor.AQUA + name);
-                item.setItemMeta(m);
+                if (m != null) {
+                    m.setDisplayName(ChatColor.AQUA + name);
+                    item.setItemMeta(m);
+                }
             } else {
                 item = entry.item.clone();
             }
             double chance = entry.chance;
             
             ItemMeta meta = item.getItemMeta();
-            List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
-            lore.add(" ");
-            lore.add(ChatColor.GRAY + "" + ChatColor.BOLD + "Current Drop Chance: " + ChatColor.YELLOW + ChatColor.BOLD + String.format("%.1f%%", chance));
-            if (entry.kind == ChristmasPresents.EntryKind.EFFECT) lore.add(ChatColor.GRAY + "Type: " + ChatColor.AQUA + entry.effectKey);
-            lore.add(ChatColor.GRAY + "" + ChatColor.BOLD + "Status: " + (entry.enabled ? ChatColor.GREEN : ChatColor.RED) + ChatColor.BOLD + (entry.enabled ? "Enabled" : "Disabled"));
-            lore.add(" ");
-            lore.add(ChatColor.YELLOW + "" + ChatColor.BOLD + "Left-Click " + ChatColor.GRAY + "to increase by 5%");
-            lore.add(ChatColor.YELLOW + "" + ChatColor.BOLD + "Right-Click " + ChatColor.GRAY + "to decrease by 5%");
-            lore.add(ChatColor.YELLOW + "" + ChatColor.BOLD + "Middle-Click " + ChatColor.GRAY + "to toggle enabled");
+            if (meta != null) {
+                List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
+                lore.add(" ");
+                lore.add(ChatColor.GRAY + "" + ChatColor.BOLD + "Drop Chance: " + ChatColor.YELLOW + ChatColor.BOLD + String.format("%.1f%%", chance));
+                if (entry.kind == ChristmasPresents.EntryKind.EFFECT) lore.add(ChatColor.GRAY + "Type: " + ChatColor.AQUA + entry.effectKey);
+                lore.add(ChatColor.GRAY + "" + ChatColor.BOLD + "Status: " + (entry.enabled ? ChatColor.GREEN : ChatColor.RED) + ChatColor.BOLD + (entry.enabled ? "Enabled" : "Disabled"));
+                lore.add(" ");
+                lore.add(ChatColor.YELLOW + "" + ChatColor.BOLD + "Left-Click " + ChatColor.GRAY + "+5%");
+                lore.add(ChatColor.YELLOW + "" + ChatColor.BOLD + "Right-Click " + ChatColor.GRAY + "-5%");
+                lore.add(ChatColor.YELLOW + "" + ChatColor.BOLD + "Middle-Click " + ChatColor.GRAY + "toggle");
+                
+                meta.setLore(lore);
+                meta.getPersistentDataContainer().set(entryKey, PersistentDataType.STRING, entry.id);
+                item.setItemMeta(meta);
+            }
             
-            meta.setLore(lore);
-            meta.getPersistentDataContainer().set(entryKey, PersistentDataType.STRING, entry.id);
-            item.setItemMeta(meta);
-            
-            inv.setItem(i, item);
+            inv.setItem(i - startIndex, item);
         }
         
-        ItemStack backButton = createMenuItem(Material.BARRIER, ChatColor.RED + "" + ChatColor.BOLD + "Back to Main Menu");
-        ItemStack saveButton = createMenuItem(Material.EMERALD_BLOCK, ChatColor.GREEN + "" + ChatColor.BOLD + "Save");
-        inv.setItem(inv.getSize() - 1, backButton);
-        inv.setItem(inv.getSize() - 2, saveButton);
         ItemStack filler = createMenuItem(Material.GRAY_STAINED_GLASS_PANE, " ");
-        for (int i = 0; i < inv.getSize(); i++) if (inv.getItem(i) == null) inv.setItem(i, filler);
+        for (int i = 45; i < 54; i++) inv.setItem(i, filler);
+        
+        if (page > 0) {
+            inv.setItem(45, createMenuItem(Material.ARROW, ChatColor.YELLOW + "" + ChatColor.BOLD + "Previous Page"));
+        }
+        if (page < totalPages - 1) {
+            inv.setItem(53, createMenuItem(Material.ARROW, ChatColor.YELLOW + "" + ChatColor.BOLD + "Next Page"));
+        }
+        inv.setItem(49, createMenuItem(Material.BARRIER, ChatColor.RED + "" + ChatColor.BOLD + "Back"));
+        inv.setItem(50, createMenuItem(Material.EMERALD_BLOCK, ChatColor.GREEN + "" + ChatColor.BOLD + "Save"));
         
         player.openInventory(inv);
         openType.put(player.getUniqueId(), presentType);
+        openPage.put(player.getUniqueId(), page);
     }
     
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        if (event.getClickedInventory() == null) return;
         if (!(event.getWhoClicked() instanceof Player)) return;
-        
         Player player = (Player) event.getWhoClicked();
         String titleText = event.getView().getTitle();
         
         if (titleText.equals(MAIN_TITLE)) {
             event.setCancelled(true);
-            
-            if (event.getCurrentItem() == null) return;
+            if (event.getCurrentItem() == null || event.getCurrentItem().getType() == Material.AIR) return;
             
             switch (event.getRawSlot()) {
                 case 3:
@@ -139,50 +154,69 @@ public class DropRateGUI implements Listener {
                     player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 1f);
                     openItemList(player, "special");
                     break;
-                default:
-                    player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.7f, 1.6f);
-                    break;
             }
-        } 
-        else if (openType.containsKey(player.getUniqueId())) {
+            return;
+        }
+        
+        if (titleText.startsWith(LIST_TITLE_PREFIX)) {
+            if (event.getClickedInventory() != event.getView().getTopInventory()) return;
             event.setCancelled(true);
             
-            if (event.getRawSlot() == event.getView().getTopInventory().getSize() - 2 &&
-                event.getCurrentItem() != null &&
-                event.getCurrentItem().getType() == Material.EMERALD_BLOCK) {
+            String presentType = openType.get(player.getUniqueId());
+            int currentPage = openPage.getOrDefault(player.getUniqueId(), 0);
+            if (presentType == null) return;
+            
+            int slot = event.getRawSlot();
+            ItemStack clicked = event.getCurrentItem();
+            if (clicked == null || clicked.getType() == Material.AIR) return;
+            
+            if (slot == 45 && clicked.getType() == Material.ARROW) {
+                player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 1f);
+                openItemList(player, presentType, currentPage - 1);
+                return;
+            }
+            if (slot == 53 && clicked.getType() == Material.ARROW) {
+                player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 1f);
+                openItemList(player, presentType, currentPage + 1);
+                return;
+            }
+            if (slot == 49 && clicked.getType() == Material.BARRIER) {
+                player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 0.9f);
+                openMainMenu(player);
+                return;
+            }
+            if (slot == 50 && clicked.getType() == Material.EMERALD_BLOCK) {
                 plugin.saveDropsFromMemory();
                 player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 1.2f);
                 player.sendMessage(ChatColor.GREEN + "" + ChatColor.BOLD + "Saved drop rates");
-                openMainMenu(player);
-                openType.remove(player.getUniqueId());
                 return;
             }
             
-            if (event.getRawSlot() == event.getView().getTopInventory().getSize() - 1 && 
-                event.getCurrentItem() != null && 
-                event.getCurrentItem().getType() == Material.BARRIER) {
-                player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 0.9f);
-                openMainMenu(player);
-                openType.remove(player.getUniqueId());
-                return;
-            }
+            if (clicked.getType() == Material.GRAY_STAINED_GLASS_PANE) return;
             
-            if (event.getCurrentItem() != null && event.getCurrentItem().getType() == Material.GRAY_STAINED_GLASS_PANE) {
-                player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.5f, 1.8f);
-                return;
-            }
-            
-            if (event.getCurrentItem() != null && event.getCurrentItem().hasItemMeta()) {
-                String presentType = openType.get(player.getUniqueId());
-                String id = event.getCurrentItem().getItemMeta().getPersistentDataContainer().get(entryKey, PersistentDataType.STRING);
+            if (slot >= 0 && slot < 45) {
+                ItemMeta meta = clicked.getItemMeta();
+                if (meta == null) return;
+                String id = meta.getPersistentDataContainer().get(entryKey, PersistentDataType.STRING);
+                if (id == null) return;
+                
                 ChristmasPresents.PresentEntry entry = findEntryById(presentType, id);
-                if (entry != null) {
-                    double currentChance = entry.chance;
-                    if (event.getClick() == ClickType.LEFT) { currentChance = Math.min(100.0, currentChance + 5.0); player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 1.1f);} 
-                    else if (event.getClick() == ClickType.RIGHT) { currentChance = Math.max(0.0, currentChance - 5.0); player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 0.9f);} 
-                    else if (event.getClick() == ClickType.MIDDLE) { entry.enabled = !entry.enabled; player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 1f, entry.enabled ? 1.4f : 0.6f); player.sendMessage((entry.enabled ? ChatColor.GREEN : ChatColor.RED) + "" + ChatColor.BOLD + (entry.enabled ? "Enabled" : "Disabled")); openItemList(player, presentType); return; }
-                    entry.chance = currentChance;
-                    openItemList(player, presentType);
+                if (entry == null) return;
+                
+                ClickType click = event.getClick();
+                if (click == ClickType.LEFT) {
+                    entry.chance = Math.min(100.0, entry.chance + 5.0);
+                    player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 1.1f);
+                    openItemList(player, presentType, currentPage);
+                } else if (click == ClickType.RIGHT) {
+                    entry.chance = Math.max(0.0, entry.chance - 5.0);
+                    player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1f, 0.9f);
+                    openItemList(player, presentType, currentPage);
+                } else if (click == ClickType.MIDDLE || click == ClickType.CREATIVE) {
+                    entry.enabled = !entry.enabled;
+                    player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 1f, entry.enabled ? 1.4f : 0.6f);
+                    player.sendMessage((entry.enabled ? ChatColor.GREEN : ChatColor.RED) + "" + ChatColor.BOLD + (entry.enabled ? "Enabled" : "Disabled"));
+                    openItemList(player, presentType, currentPage);
                 }
             }
         }
@@ -198,9 +232,11 @@ public class DropRateGUI implements Listener {
     private ItemStack createMenuItem(Material material, String name, String... lore) {
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
-        meta.setDisplayName(name);
-        if (lore != null && lore.length > 0) meta.setLore(Arrays.asList(lore));
-        item.setItemMeta(meta);
+        if (meta != null) {
+            meta.setDisplayName(name);
+            if (lore != null && lore.length > 0) meta.setLore(Arrays.asList(lore));
+            item.setItemMeta(meta);
+        }
         return item;
     }
 }

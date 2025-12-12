@@ -34,5 +34,5 @@ processResources {
 
 jar {
     archiveBaseName.set('ChristmasPresents')
-    archiveVersion.set('1.0.6-orphanfix')
+    archiveVersion.set('1.0.7')
 }
